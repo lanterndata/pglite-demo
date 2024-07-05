@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/css/jquery.terminal.min.css" rel="stylesheet"/>
+    <link href="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.css" rel="stylesheet"/>
+    <style>
+         .fade-out {
+            animation: fadeOut 0.3s forwards;
+        }
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+        #search-container {
+            height: calc(100vh - 20px); /* Adjust the height according to the desired space */
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        #last-result {
+            height: 40vh;
+            width: 30vw;
+            overflow-y: auto;
+            background: white;
+            padding-top: 5px;
+        }
+        .container {
+            height: calc(100vh - 20px); /* Ensure it takes the full height minus margins */
+            display: flex;
+            flex-direction: row;
+        }
+        .search-wrapper {
+            flex: 3;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .terminal-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container py-10 m-auto">
+        <div class="search-wrapper bg-white p-6">
+            <div id="setup-messages" class="mb-4">
+                <div class="text-gray-700 mb-2">Loading WASM...</div>
+            </div>
+            <div id="search-container" class="hidden">
+                <div class="mx-w-lg mx-auto text-lg font-semibold text-center p-5"><h1>Search nearest restaurants</h1></div>
+                <div class="mb-4 px-10">
+                    <input type="text" id="restaurant-input" placeholder="Type a restaurant name" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="suggestions px-10" id="suggestions"></div>
+                <div class="restaurant-details mt-6" id="restaurant-details"></div>
+            </div>
+        </div>
+        <div class="terminal-wrapper">
+            <div id="terminal" class="w-full bg-gray-900 text-white flex-1"></div>
+            <div id="last-result">
+                <div class="text-lg font-semibold text-center">Last Output</div>
+                <pre id="json-renderer"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/js/jquery.terminal.min.js"></script>
+        
+    <script type="module">
+       // Initialize the terminal
+       const RESPONSES = {};
+       function getTerminalOutputFromResult(result) {
+           if (result.rows.length) {
+               const responseJson = JSON.stringify(result.rows, null, 2);
+               RESPONSES[terminal.last_index()] = responseJson;
+               $('#json-renderer').jsonViewer(result.rows);
+               return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index()}" to view all output>`;
+           }
+
+           return `AFFECTED: ${result.affectedRows}`;
+           
+       }
+
+       window.terminal = await new Promise(resolve => {
+           jQuery(function($, undefined) {
+               const term = $('#terminal').terminal(async function(command) {
+                   if (!command) return;
+                   const showCmdParts = command.match(/show (\d+)/)
+
+                   if (showCmdParts) {
+                       const lineNumber = showCmdParts[1];
+                       if (RESPONSES[lineNumber]) {
+                         this.update(lineNumber, RESPONSES[lineNumber]);
+                       } else {
+                         this.error(`response ${lineNumber} does not exist`);
+                       }
+
+                       return;
+                   }
+                   try {
+                       const result = await pg.query(command);
+                       this.echo(getTerminalOutputFromResult(result));
+                   } catch(err) {
+                       console.error(err);
+                       this.error(`ERROR: ${err}`);
+                   }
+               }, {
+                   greetings: 'Pglite Shell\n',
+                   name: 'psql',
+                   height: window.innerHeight / 2,
+                   prompt: 'postgres@browser=# '
+               });
+               resolve(term);
+           });
+       });
+       
+       import { PGlite } from "../dist/index.js";
+       
+       const restaurantInput = document.getElementById('restaurant-input');
+       const suggestionsContainer = document.getElementById('suggestions');
+       const detailsContainer = document.getElementById('restaurant-details');
+       // In-memory database:
+       const pg = new PGlite({
+         extensions: {
+           lantern: {
+             // this path should contain lantern.control, lantern--$version.sql and lantern.wasm files
+             // the module_pathname in control file will be https://storage.googleapis.com/lantern-wasm/lantern-dev/lantern.wasm
+             pathOrUrl: 'https://storage.googleapis.com/lantern-wasm/lantern-dev',
+             setup: () => null,
+           },
+           vector: {
+             pathOrUrl: 'https://storage.googleapis.com/lantern-wasm/pgvector',
+             setup: () => null
+           },
+         }
+       });
+
+       window.pg = pg;
+       await pg.waitReady;
+
+       async function showMessage(msg) {
+           const messagesContainer = document.getElementById('setup-messages');
+           const messageElement = document.createElement('div');
+           messageElement.textContent = msg;
+           messageElement.className = 'text-gray-700 mb-2';
+           messagesContainer.appendChild(messageElement);
+       }
+
+       function emulateQueryInTerminal(query, pause, resume) {
+           terminal.echo(query);
+       };
+
+       async function setup() {
+           showMessage("Initializing...");
+           const messagesContainer = document.getElementById('setup-messages');
+           showMessage("Running init sql...");
+           const geoData = await (await fetch('/restaurants.json')).json();
+           await terminal.exec("CREATE EXTENSION lantern");
+           await terminal.exec("CREATE EXTENSION vector");
+           await terminal.exec("CREATE TABLE restaurants (id SERIAL PRIMARY KEY, address TEXT, categories TEXT, city TEXT, country VARCHAR(2), cords REAL[], cords_vec VECTOR(2), name TEXT, state VARCHAR(2), websites TEXT)");
+           const insertQuery =  "INSERT INTO restaurants (address, categories, city, country, cords, cords_vec, name, state, websites) VALUES ($1, $2, $3, $4, $5::REAL[], $5::VECTOR(2), $6, $7, $8)";
+           emulateQueryInTerminal(insertQuery, true);
+           for (const data of geoData) {
+              await pg.query(
+                   "INSERT INTO restaurants (address, categories, city, country, cords, cords_vec, name, state, websites) VALUES ($1, $2, $3, $4, $5::REAL[], $5::VECTOR(2), $6, $7, $8)",
+                   [
+                       data.address,
+                       data.categories,
+                       data.city,
+                       data.country,
+                       data.cords,
+                       data.name,
+                       data.state,
+                       data.websites
+                   ]
+               );
+           }
+           emulateQueryInTerminal(`INSERT ${geoData.length}`, false, true);
+           await terminal.exec("CREATE INDEX ON restaurants USING lantern_hnsw(cords) WITH (M=32, ef_construction=128, ef=128)");
+           await terminal.exec("EXPLAIN SELECT id FROM restaurants ORDER BY cords <-> '{0,0}' LIMIT 10");
+           await new Promise(r => setTimeout(r, 300));
+           messagesContainer.classList.add("fade-out");
+           messagesContainer.addEventListener('animationend', () => {
+              messagesContainer.classList.add('hidden');
+              document.getElementById('search-container').classList.remove('hidden');
+           });
+       }
+
+       async function findNearestRestaurants(id, cords) {
+           emulateQueryInTerminal(`SELECT name, cords, city, state, address, (cords <-> '{${cords.join(',')}}'::REAL[]) as distance, websites FROM restaurants WHERE id != ${id} ORDER BY distance LIMIT 10;`, true);
+           const result = await pg.query('SELECT name, cords, city, state, address, (cords <-> $2::REAL[]) as distance, websites FROM restaurants WHERE id != $1 ORDER BY distance LIMIT 10;', [id, cords]);
+           emulateQueryInTerminal(getTerminalOutputFromResult(result), false, true);
+           return result.rows
+       }
+       
+       async function findRestaurantByName(name) {
+           emulateQueryInTerminal(`SELECT id, name, cords, city, state, address  FROM restaurants WHERE name ILIKE '%${name}%' LIMIT 20;`, true);
+           const result = await pg.query("SELECT id, name, cords, city, state, address  FROM restaurants WHERE name ILIKE '%' || $1 || '%' LIMIT 20;", [name]);
+           emulateQueryInTerminal(getTerminalOutputFromResult(result), false, true);
+           return result.rows
+       }
+
+
+       function displayRestaurantDetails(restaurant, search) {
+           const website = restaurant.websites ?  restaurant.websites.split(',')[0] : '#';
+           suggestionsContainer.innerHTML = '';
+           if (search) {
+               detailsContainer.innerHTML = `
+                   <div>
+                       <div class="text-gray-600">${restaurant.name} - ${restaurant.address}, ${restaurant.city}, ${restaurant.state}</div>
+                       <div class="text-lg font-semibold border-gray-600 border-b my-4">Nearest restaurants</div>
+                   </div>
+               `;
+           } else {
+               detailsContainer.innerHTML += `
+                   <div>
+                       <div class="text-md font-semibold">${restaurant.name}</div>
+                       <div class="text-gray-600"> ${restaurant.address}, ${restaurant.city}, ${restaurant.state}</div>
+                       <div class="text-gray-600"> Distance - ${restaurant.distance}</div>
+                       <div class="text-blue-500">
+                           <a href="${website}" target="_blank">Website</a>
+                       </div>
+                   </div>
+               `;
+           }
+       }
+
+       restaurantInput.addEventListener('input', async () => {
+           const query = restaurantInput.value.toLowerCase();
+           suggestionsContainer.innerHTML = '';
+
+           if (query) {
+               const filteredRestaurants = await findRestaurantByName(query);
+               filteredRestaurants.forEach(restaurant => {
+                   const suggestion = document.createElement('div');
+                   suggestion.textContent = `${restaurant.name} - ${restaurant.address}, ${restaurant.city}, ${restaurant.state}`;
+                   suggestion.className = 'p-2 cursor-pointer hover:bg-gray-200';
+                   suggestion.addEventListener('click', async () => {
+                       displayRestaurantDetails(restaurant, true);
+                       const nearestRestaurants = await findNearestRestaurants(restaurant.id, restaurant.cords);
+                       nearestRestaurants.forEach(r => displayRestaurantDetails(r))
+                   });
+                   suggestionsContainer.appendChild(suggestion);
+               });
+           }
+       });
+
+       await setup();
+    </script>
+</body>
+</html>

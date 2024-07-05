@@ -1,0 +1,2 @@
+import{d as o}from"../chunk-NTMOV32R.js";import{a,c as s}from"../chunk-GHJ6IH6A.js";import{i}from"../chunk-THKM2UGU.js";i();var r,y={async init(t,e,n){return r=new o(t,e),await r.waitReady,n&&r.onNotification(n),!0},async close(){await r.close()},async query(t,e,n){return await r.query(t,e,n)},async exec(t,e){return await r.exec(t,e)},async transaction(t){return await r.transaction(e=>t(s(e)))},async execProtocol(t){return await r.execProtocol(t)}};a(y);
+//# sourceMappingURL=process.js.map
