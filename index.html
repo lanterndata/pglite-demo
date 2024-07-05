@@ -84,9 +84,9 @@
        function getTerminalOutputFromResult(result) {
            if (result.rows.length) {
                const responseJson = JSON.stringify(result.rows, null, 2);
-               RESPONSES[terminal.last_index()] = responseJson;
+               RESPONSES[terminal.last_index() + 1] = responseJson;
                $('#json-renderer').jsonViewer(result.rows);
-               return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index()}" to view all output>`;
+               return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index() + 1}" to view all output>`;
            }
 
            return `AFFECTED: ${result.affectedRows}`;
