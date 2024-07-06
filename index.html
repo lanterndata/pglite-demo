@@ -79,6 +79,30 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/js/jquery.terminal.min.js"></script>
         
     <script type="module">
+        const PSQL_COMMANDS = {
+          '\\d': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\dt': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\dx': 'SELECT * FROM pg_available_extensions;',
+          '\\l': 'SELECT datname FROM pg_database;',
+          '\\c': 'SELECT current_database();',
+          '\\dn': 'SELECT nspname FROM pg_catalog.pg_namespace;',
+          '\\df': 'SELECT proname FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+          '\\dv': 'SELECT viewname FROM pg_catalog.pg_views WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\di': 'SELECT indexname FROM pg_indexes WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\ds': 'SELECT relname FROM pg_statio_user_tables;',
+          '\\dD': 'SELECT obj_description(oid) FROM pg_class WHERE relkind = \'r\';',
+          '\\dE': 'SELECT eventname FROM pg_event_trigger;',
+          '\\dy': 'SELECT * FROM pg_stat_activity;',
+          '\\do': 'SELECT * FROM pg_am;',
+          '\\da': 'SELECT * FROM pg_aggregate;',
+          '\\dc': 'SELECT * FROM pg_conversion;',
+          '\\dp': 'SELECT * FROM information_schema.role_table_grants;',
+          '\\dd': 'SELECT * FROM pg_description;',
+          '\\df+': 'SELECT * FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+          '\\dm': 'SELECT matviewname FROM pg_matviews;',
+          '\\ds+': 'SELECT * FROM pg_statio_user_tables;',
+          '\\dT': 'SELECT typname FROM pg_type WHERE typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');'
+        };
        // Initialize the terminal
        const RESPONSES = {};
        function getTerminalOutputFromResult(result) {
@@ -95,8 +119,9 @@
 
        window.terminal = await new Promise(resolve => {
            jQuery(function($, undefined) {
-               const term = $('#terminal').terminal(async function(command) {
-                   if (!command) return;
+               const term = $('#terminal').terminal(async function(cmd) {
+                   if (!cmd) return;
+                   const command = PSQL_COMMANDS[cmd.trim()] ? PSQL_COMMANDS[cmd.trim()] : cmd;
                    const showCmdParts = command.match(/show (\d+)/)
 
                    if (showCmdParts) {
@@ -206,7 +231,7 @@
        }
        
        async function findRestaurantByName(name) {
-           emulateQueryInTerminal(`SELECT id, name, cords, city, state, address  FROM restaurants WHERE name ILIKE '%${name}%' LIMIT 20;`, true);
+           emulateQueryInTerminal(`SELECT id, name, cords, city, state, address  FROM restaurants WHERE name ILIKE '%${name.replaceAll("'", "''")}%' LIMIT 20;`, true);
            const result = await pg.query("SELECT id, name, cords, city, state, address  FROM restaurants WHERE name ILIKE '%' || $1 || '%' LIMIT 20;", [name]);
            emulateQueryInTerminal(getTerminalOutputFromResult(result), false, true);
            return result.rows
