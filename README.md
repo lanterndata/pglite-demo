@@ -8,4 +8,5 @@ The demo loads Lantern and Pgvector extensions into the database and builds a ve
 
 There's also interactive psql shell which can be used to interact with the database.
 
-<img width="1574" alt="image" src="https://github.com/lanterndata/pglite-demo/assets/17221195/06b9d811-78bc-44d2-80c7-3925fb0fe79f">
+https://github.com/lanterndata/pglite-demo/assets/17221195/ba8dbe28-dd63-41a7-9265-e5032445281a
+
