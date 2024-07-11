@@ -107,10 +107,14 @@
        const RESPONSES = {};
        function getTerminalOutputFromResult(result) {
            if (result.rows.length) {
-               const responseJson = JSON.stringify(result.rows, null, 2);
-               RESPONSES[terminal.last_index() + 1] = responseJson;
                $('#json-renderer').jsonViewer(result.rows);
-               return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index() + 1}" to view all output>`;
+               const responseJson = JSON.stringify(result.rows, null, 2);
+               if (responseJson.length > 500) {
+                  RESPONSES[terminal.last_index() + 1] = responseJson;
+                  return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index() + 1}" to view all output>`;
+                } else {
+                  return responseJson;
+               }
            }
 
            return `AFFECTED: ${result.affectedRows}`;
