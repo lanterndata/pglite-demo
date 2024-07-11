@@ -20,13 +20,14 @@
                 opacity: 0;
             }
         }
-        #search-container {
+        
+        #search-container, #setup-messages {
             height: calc(100vh - 20px); /* Adjust the height according to the desired space */
             overflow-y: auto;
             overflow-x: hidden;
         }
         #last-result {
-            height: 40vh;
+            height: 45vh;
             width: 30vw;
             overflow-y: auto;
             background: white;
@@ -48,6 +49,13 @@
             display: flex;
             flex-direction: column;
         }
+
+        #custom-extension {
+          display: flex;
+          flex-direction: column;
+          width: 50vw;
+          border-top: 1px solid black;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -64,6 +72,16 @@
                 <div class="suggestions px-10" id="suggestions"></div>
                 <div class="restaurant-details mt-6" id="restaurant-details"></div>
             </div>
+            <div id="custom-extension" class="">
+                <div class="text-md font-semibold text-center bg-white">Add Custom Extension</div>
+                <div class="w-full mb-4">
+                    <input id="ext-name" value="pgcrypto" class="block w-full p-2 border border-gray-300 rounded" />
+                </div>
+                <div class="w-full mb-4">
+                    <input id="ext-url" value="https://storage.googleapis.com/lantern-wasm/pgcrypto" class="mt-1 block w-full p-2 border border-gray-300 rounded" />
+                </div>
+                <button onclick="addExtension()" class="w-full text-white bg-black">Add</button>
+            </div>
         </div>
         <div class="terminal-wrapper">
             <div id="terminal" class="w-full bg-gray-900 text-white flex-1"></div>
@@ -71,7 +89,6 @@
                 <div class="text-lg font-semibold text-center">Last Output</div>
                 <pre id="json-renderer"></pre>
             </div>
-        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jquery"></script>
@@ -120,6 +137,51 @@
            return `AFFECTED: ${result.affectedRows}`;
            
        }
+
+       async function addExtension() {
+            const name = document.getElementById('ext-name').value.trim();
+            const link = document.getElementById('ext-url').value.trim();
+
+            if (!name || !link) return;
+            const messagesContainer = document.getElementById('setup-messages');
+
+            try {
+               const extensionName = name.replaceAll('"', '');
+               const extensionNameLiteral = name.replaceAll('"', '').replaceAll("'", "''");
+               const [res] = await pg.exec(`SELECT * FROM pg_available_extensions WHERE name='${extensionNameLiteral}'`);
+               
+               if (res.rows.length) {
+                 throw new Error(`Extension ${extensionName} already added`);
+               }
+
+               messagesContainer.innerHTML = '';
+               messagesContainer.classList.remove('fade-out');
+               messagesContainer.classList.remove('hidden');
+               document.getElementById('search-container').classList.add('hidden');
+               showMessage(`Fetching control and SQL files for extension ${extensionName}...`);
+               await window.pg.addExtension(extensionName, {
+                   pathOrUrl: link
+               });
+               showMessage(`Checking if extension was added successfully...`);
+               await terminal.exec(`SELECT * FROM pg_available_extensions WHERE name='${extensionName}'`);
+               showMessage(`Loading extension...`);
+               await terminal.exec(`CREATE EXTENSION "${extensionName}"`);
+               await terminal.exec(`SELECT * FROM pg_available_extensions WHERE name='${extensionName}'`);
+               await terminal.exec("\\dx");
+               showMessage(`Ready!`);
+            } catch (err) {
+                console.error(err);
+                alert(err.message);
+            } finally {
+               messagesContainer.classList.add("fade-out");
+               messagesContainer.addEventListener('animationend', () => {
+                  messagesContainer.classList.add('hidden');
+                  document.getElementById('search-container').classList.remove('hidden');
+               });
+            }
+       }
+
+       window.addExtension = addExtension;
 
        window.terminal = await new Promise(resolve => {
            jQuery(function($, undefined) {
