@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/css/jquery.terminal.min.css" rel="stylesheet"/>
+    <link href="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.css" rel="stylesheet"/>
+    <style>
+         .fade-out {
+            animation: fadeOut 0.3s forwards;
+        }
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+        
+        #search-container, #setup-messages {
+            height: calc(100vh - 20px); /* Adjust the height according to the desired space */
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .container {
+            height: calc(100vh - 20px); /* Ensure it takes the full height minus margins */
+            display: flex;
+            flex-direction: row;
+        }
+        .search-wrapper {
+            flex: 3;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .terminal-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #custom-extension {
+          display: flex;
+          flex-direction: column;
+          width: 50vw;
+          border-top: 1px solid black;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container py-10 m-auto">
+        <div class="search-wrapper bg-white p-6">
+            <div id="setup-messages" class="mb-4">
+                <div class="text-gray-700 mb-2">Loading WASM...</div>
+            </div>
+            <div id="search-container" class="hidden">
+                <div id="last-result">
+                    <div class="text-lg font-semibold text-center">Parsed Index</div>
+                    <pre id="json-renderer"></pre>
+                </div>
+            </div>
+            <button onclick="parse_pgvector_index()" class="w-full text-white bg-black">Parse Index</button>
+        </div>
+        <div class="terminal-wrapper">
+            <div id="terminal" class="w-full bg-gray-900 text-white flex-1"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/js/jquery.terminal.min.js"></script>
+        
+    <script type="module">
+        const PSQL_COMMANDS = {
+          '\\d': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\dt': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\dx': 'SELECT * FROM pg_available_extensions;',
+          '\\l': 'SELECT datname FROM pg_database;',
+          '\\c': 'SELECT current_database();',
+          '\\dn': 'SELECT nspname FROM pg_catalog.pg_namespace;',
+          '\\df': 'SELECT proname FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+          '\\dv': 'SELECT viewname FROM pg_catalog.pg_views WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\di': 'SELECT indexname FROM pg_indexes WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+          '\\ds': 'SELECT relname FROM pg_statio_user_tables;',
+          '\\dD': 'SELECT obj_description(oid) FROM pg_class WHERE relkind = \'r\';',
+          '\\dE': 'SELECT eventname FROM pg_event_trigger;',
+          '\\dy': 'SELECT * FROM pg_stat_activity;',
+          '\\do': 'SELECT * FROM pg_am;',
+          '\\da': 'SELECT * FROM pg_aggregate;',
+          '\\dc': 'SELECT * FROM pg_conversion;',
+          '\\dp': 'SELECT * FROM information_schema.role_table_grants;',
+          '\\dd': 'SELECT * FROM pg_description;',
+          '\\df+': 'SELECT * FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+          '\\dm': 'SELECT matviewname FROM pg_matviews;',
+          '\\ds+': 'SELECT * FROM pg_statio_user_tables;',
+          '\\dT': 'SELECT typname FROM pg_type WHERE typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');'
+        };
+       // Initialize the terminal
+       const RESPONSES = {};
+       const INDEX_NAME = 'restaurants_cords_idx';
+       function getTerminalOutputFromResult(result) {
+           if (result.rows.length) {
+               const responseJson = JSON.stringify(result.rows, null, 2);
+               if (responseJson.length > 500) {
+                  RESPONSES[terminal.last_index() + 1] = responseJson;
+                  return `${JSON.stringify(result.rows).slice(0, 10)}... <type "show ${terminal.last_index() + 1}" to view all output>`;
+                } else {
+                  return responseJson;
+               }
+           }
+
+           return `AFFECTED: ${result.affectedRows}`;
+           
+       }
+
+       window.terminal = await new Promise(resolve => {
+           jQuery(function($, undefined) {
+               const term = $('#terminal').terminal(async function(cmd) {
+                   if (!cmd) return;
+                   const command = PSQL_COMMANDS[cmd.trim()] ? PSQL_COMMANDS[cmd.trim()] : cmd;
+                   const showCmdParts = command.match(/show (\d+)/)
+
+                   if (showCmdParts) {
+                       const lineNumber = showCmdParts[1];
+                       if (RESPONSES[lineNumber]) {
+                         this.update(lineNumber, RESPONSES[lineNumber]);
+                       } else {
+                         this.error(`response ${lineNumber} does not exist`);
+                       }
+
+                       return;
+                   }
+                   try {
+                       const result = await pg.query(command);
+                       this.echo(getTerminalOutputFromResult(result));
+                   } catch(err) {
+                       console.error(err);
+                       this.error(`ERROR: ${err}`);
+                   }
+               }, {
+                   greetings: 'Pglite Shell\n',
+                   name: 'psql',
+                   height: window.innerHeight / 2,
+                   prompt: 'postgres@browser=# '
+               });
+               resolve(term);
+           });
+       });
+       
+       import { PGlite } from "../dist/index.js";
+       
+       // In-memory database:
+       const pg = new PGlite({
+         extensions: {
+           vector: {
+             // pathOrUrl: 'http://localhost:5555',
+             pathOrUrl: 'https://storage.googleapis.com/lantern-wasm/pgvector-lantern',
+             setup: () => null
+           },
+         }
+       });
+
+       window.pg = pg;
+       await pg.waitReady;
+
+       async function showMessage(msg) {
+           const messagesContainer = document.getElementById('setup-messages');
+           const messageElement = document.createElement('div');
+           messageElement.textContent = msg;
+           messageElement.className = 'text-gray-700 mb-2';
+           messagesContainer.appendChild(messageElement);
+       }
+
+       function emulateQueryInTerminal(query, pause, resume) {
+           terminal.echo(query);
+       };
+
+       async function setup() {
+           showMessage("Initializing...");
+           const messagesContainer = document.getElementById('setup-messages');
+           showMessage("Running init sql...");
+           const geoData = (await (await fetch('/restaurants.json')).json()).slice(0,10);
+           await terminal.exec("CREATE EXTENSION vector");
+           await terminal.exec("CREATE TABLE restaurants (id SERIAL PRIMARY KEY, address TEXT, categories TEXT, city TEXT, country VARCHAR(2), cords VECTOR(2), name TEXT, state VARCHAR(2), websites TEXT)");
+           const insertQuery =  "INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)";
+           emulateQueryInTerminal(insertQuery, true);
+           for (const data of geoData) {
+              await pg.query(
+                   "INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)",
+                   [
+                       data.address,
+                       data.categories,
+                       data.city,
+                       data.country,
+                       `[${data.cords.join(',')}]`,
+                       data.name,
+                       data.state,
+                       data.websites
+                   ]
+               );
+           }
+           emulateQueryInTerminal(`INSERT ${geoData.length}`, false, true);
+           await terminal.exec(`CREATE INDEX ${INDEX_NAME} ON restaurants USING hnsw(cords vector_l2_ops) WITH (M=4, ef_construction=128)`);
+           await new Promise(r => setTimeout(r, 300));
+           messagesContainer.classList.add("fade-out");
+           messagesContainer.addEventListener('animationend', () => {
+              messagesContainer.classList.add('hidden');
+              document.getElementById('search-container').classList.remove('hidden');
+           });
+       }
+
+
+       async function parse_pgvector_index(index_name = INDEX_NAME) {
+            const res = await pg.query(`select relname, relfilenode from pg_class where relname='${index_name}';`)
+            if (!res.rows.length) return;
+            await pg.exec(`CHECKPOINT;`);
+            const index_file_name = `/pgdata/base/1/${res.rows[0].relfilenode}`;
+            var ptr = pg.emp.stringToNewUTF8(index_file_name)
+            const retPtr = pg.emp.resolveGlobalSymbol('parse_pgvector_index_to_json').sym(ptr)
+            pg.emp.___libc_free(ptr);
+            const jsonStr = pg.emp.UTF8ToString(retPtr);
+            $('#json-renderer').jsonViewer(JSON.parse(jsonStr));
+       }
+
+       window.parse_pgvector_index = parse_pgvector_index;
+
+       await setup();
+       parse_pgvector_index(INDEX_NAME);
+       
+    </script>
+</body>
+</html>
