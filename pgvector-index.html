@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restaurant Search</title>
+    <title>Pgvector Index Parser</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/css/jquery.terminal.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.css" rel="stylesheet" />
@@ -26,7 +26,7 @@
       #main-container,
       #setup-messages {
         display: flex;
-        height: calc(100vh - 20px);
+        min-height: calc(100vh - 20px);
         /* Adjust the height according to the desired space */
         overflow-y: auto;
         overflow-x: hidden;
@@ -38,14 +38,14 @@
       }
 
       .container {
-        height: calc(100vh - 20px);
+        min-height: calc(100vh - 20px);
         /* Ensure it takes the full height minus margins */
         display: flex;
         flex-direction: row;
       }
 
       .search-wrapper {
-        flex: 3;
+        min-width: calc(100vw / 1.70);
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -69,25 +69,24 @@
         font-weight: bold;
       }
 
-      .element {
+      .TYPE_ELEMENT {
         background: gray;
       }
 
-      .neighbor {
+      .TYPE_NEIGHBOR {
         background: wheat;
       }
 
-      .element:hover,
-      .neighbor:hover {
-        opacity: .6;
-      }
-
       .page-header {
+        font-size: 10px;
         background: yellowgreen;
       }
 
       #page-view {
         height: calc(100% - 60px);
+        overflow-y: hidden;
+        border: 1px solid;
+        box-sizing: content-box;
       }
 
       .linp {
@@ -96,6 +95,8 @@
 
       .pd-special {
         background: #00ff6e;
+        word-break: break-all;
+        font-size: 10px;
       }
 
       .selected {
@@ -114,16 +115,26 @@
       #segment-view {
         flex-wrap: wrap;
       }
+
+      .page-header:hover,
+      .pd-special:hover,
+      .linp:hover {
+        opacity: .6;
+      }
+
+      .elem-deleted {
+        background: repeating-linear-gradient(-45deg, tomato 0px, tomato 4px, gray 4px, gray 12px);
+      }
     </style>
   </head>
   <body class="bg-gray-100">
-    <div class="container py-10 m-auto">
-      <div class="search-wrapper bg-white p-6">
+    <div class="container mx-auto">
+      <div class="search-wrapper bg-white">
         <div id="setup-messages" class="mb-4 flex-col">
           <div class="text-gray-700 mb-2">Loading WASM...</div>
         </div>
         <div id="main-container" class="flex-col items-center">
-          <div id="visual-view" class="w-full h-full">
+          <div id="visual-view" class="w-full h-full flex flex-col items-center">
             <div class="flex justify-between w-full mb-5">
               <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="previousView()"> Prev </button>
               <span id="title">restaurants_cords_idx</span>
@@ -132,16 +143,17 @@
             <div id="segment-view" class="flex flex-row w-full"></div>
             <div id="page-view" class="w-full relative hidden"></div>
             <div id="block-json" class="modal">
+              <p id="item-description"></p>
               <div id="json-data"></div>
             </div>
           </div>
           <div id="json-view" class="hidden">
             <pre id="json-renderer"></pre>
           </div>
-        </div>
-        <div class="flex justify-around">
-          <button id="visual-view-btn" onclick="setViewMode('visual')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l mr-5 selected">Visual View</button>
-          <button id="json-view-btn" onclick="setViewMode('json')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l">JSON View</button>
+          <div class="flex justify-around">
+            <button id="visual-view-btn" onclick="setViewMode('visual')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l mr-5 selected">Visual View</button>
+            <button id="json-view-btn" onclick="setViewMode('json')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l">JSON View</button>
+          </div>
         </div>
       </div>
       <div class="terminal-wrapper">
@@ -149,7 +161,8 @@
         <div id="terminal-btns" class="flex justify-around">
           <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="insertItems(10)">Insert 10</button>
           <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="removeItems(10)">Delete 10</button>
-          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="fullVacuum()">Full Vacuum</button>
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="vacuum(false)">Vacuum</button>
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="vacuum(true)">Full Vacuum</button>
         </div>
       </div>
     </div>
@@ -192,6 +205,7 @@
           if (responseJson.length > 500) {
             RESPONSES[terminal.last_index() + 1] = responseJson;
             return `${JSON.stringify(result.rows).slice(0, 10)}... 
+						
 						<type "show ${terminal.last_index() + 1}" to view all output>`;
           } else {
             return responseJson;
@@ -309,18 +323,6 @@
       }
       window.parse_pgvector_index = parse_pgvector_index;
       let SELECTED_PAGE = 0;
-      const {
-        ELEM_WIDTH,
-        ELEM_HEIGHT,
-        NEIGHBOR_WIDTH,
-        NEIGHBOR_HEIGHT,
-        HEADER_WIDTH,
-        HEADER_HEIGHT,
-        LINP_WIDTH,
-        LINP_HEIGHT,
-        SP_WIDTH,
-        SP_HEIGHT
-      } = calculateSizes();
 
       function tidToText(tid) {
         const blockNumber = tid.ip_blkid.bi_hi << 16 | tid.ip_blkid.bi_lo;
@@ -328,107 +330,237 @@
         return `(${blockNumber}, ${offset})`;
       }
 
-      function calculateSizes(data) {
+      function calculateSizes(page) {
+        const PageView = document.getElementById('page-view');
+        const PAGE_SIZE_BYTE = page.header.pd_pagesize_version;
+        let ELEM_SIZE_BYTE = 0;
+        let NEIGHBOR_SIZE_BYTE = 0;
+        let BIGGEST_ITEM_BYTE = 0;
+        for (let i = 0; i < page.header.pd_linp.length; i++) {
+          if (page.elements[i].value.type === 'TYPE_NEIGHBOR') {
+            NEIGHBOR_SIZE_BYTE = page.header.pd_linp[i].lp_len;
+          } else {
+            ELEM_SIZE_BYTE = page.header.pd_linp[i].lp_len;
+          }
+          if (page.header.pd_linp[i].lp_len > BIGGEST_ITEM_BYTE) {
+            BIGGEST_ITEM_BYTE = page.header.pd_linp[i].lp_len;
+          }
+        }
+        const HEADER_SIZE_BYTE = 24;
+        const LINP_SIZE_BYTE = 4;
+        const SPECIAL_SIZE_BYTE = 12;
+        const SMALLEST_ITEM_COUNT = PAGE_SIZE_BYTE / LINP_SIZE_BYTE;
+        let PAGE_WIDTH = 1024;
+
+        if (window.innerHeight - 80 < 1024) {
+          PAGE_WIDTH = 928;
+          $("#visual-view").css("overflow-x", "auto");
+        }
+
+        if (window.innerHeight - 80 < 928) {
+          PAGE_WIDTH = 768;
+          $("#visual-view").css("overflow-x", "auto");
+        }
+        const GRID_SQUARE_HEIGHT = 16;
+        const GRID_SQUARE_WIDTH = PAGE_WIDTH ** 2 / SMALLEST_ITEM_COUNT / GRID_SQUARE_HEIGHT;
+        const PAGE_HEIGHT = PAGE_WIDTH;
+        PageView.style.height = `${PAGE_WIDTH}px`;
+        PageView.style.width = `${PAGE_WIDTH}px`;
+        const BIGGEST_ELEM_AREA = ((BIGGEST_ITEM_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const ELEM_AREA = ((ELEM_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const SP_AREA = ((SPECIAL_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const HEADER_AREA = ((HEADER_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const HEADER_HEIGHT = GRID_SQUARE_HEIGHT;
+        const LINP_WIDTH = GRID_SQUARE_WIDTH;
+        const LINP_HEIGHT = GRID_SQUARE_HEIGHT;
+        let BIGGEST_ITEM_HEIGHT = LINP_HEIGHT; //Math.sqrt(BIGGEST_ELEM_AREA);
+        let ELEM_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        let ELEM_WIDTH = ELEM_AREA / ELEM_HEIGHT;
+        let NEIGHBOR_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        let SP_HEIGHT = ELEM_HEIGHT;
+        let SP_WIDTH = SP_AREA / SP_HEIGHT;
+        let HEADER_WIDTH = HEADER_AREA / HEADER_HEIGHT;
         return {
-          ELEM_WIDTH: 80,
-          ELEM_HEIGHT: 40,
-          NEIGHBOR_WIDTH: 60,
-          NEIGHBOR_HEIGHT: 40,
-          HEADER_WIDTH: 100,
-          HEADER_HEIGHT: 50,
-          LINP_WIDTH: 50,
-          LINP_HEIGHT: 50,
-          SP_WIDTH: 100,
-          SP_HEIGHT: 40
+          getNeighborWidth: i => {
+            const neighborBytes = page.header.pd_linp[i].lp_len
+            const neihborArea = ((neighborBytes / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+            return neihborArea / NEIGHBOR_HEIGHT;
+          },
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
         }
       }
 
-      function setElementHover(el) {
-        el.style.opacity = '0.6';
+      function setElementHover(elements) {
+        elements.css('opacity', '0.6');
       }
 
-      function removeElementHover(el) {
-        el.style.opacity = '1';
+      function removeElementHover(elements) {
+        elements.css('opacity', '1');
       }
 
-      function drawLinePointers(linePointers) {
+      function drawLinePointers(linePointers, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT,
+          LAST_ELEMENT_X,
+          LAST_ELEMENT_Y,
+        } = ctx;
         const PageView = document.getElementById('page-view');
         let row = 0;
         let currX = HEADER_WIDTH;
-        const PAGE_WIDTH = PageView.clientWidth;
-        const PAGE_HEIGHT = PageView.clientHeight;
-        for (let i = 0; i < linePointers.length; i++) {
+        let i = 0;
+        while (i < linePointers.length) {
+          const elemY = LINP_HEIGHT * row;
           const el = document.createElement('div');
           el.style.width = `${LINP_WIDTH}px`;
           el.style.height = `${LINP_HEIGHT}px`;
           el.style.position = `absolute`;
           el.style.left = `${currX}px`;
-          el.style.top = `${LINP_HEIGHT * row}px`;
+          el.style.top = `${elemY}px`;
           el.style.border = `1px solid`;
           el.style.textAlign = `center`;
-          el.innerText = `lp${i + 1}`
+          el.style.fontSize = `10px`;
+          el.innerText = `${i + 1}`
           el.classList.add('cursor-pointer');
           el.classList.add('linp');
+          const pointedElementClass = `.elem-${i + 1}`;
           el.onmouseenter = () => {
-            const elem = document.getElementById(`elem-${i + 1}`);
-            if (!elem) return;
-            setElementHover(elem);
+            setElementHover($(pointedElementClass));
           };
           el.onmouseleave = () => {
-            const elem = document.getElementById(`elem-${i + 1}`);
-            if (!elem) return;
-            removeElementHover(elem);
+            removeElementHover($(pointedElementClass));
           };
-          el.onclick = () => showJSONDetails(linePointers[i]);
+          const linePointer = linePointers[i];
+          el.onclick = () => showJSONDetails(linePointer, 'Page Item Pointer');
           currX += LINP_WIDTH;
           if (currX + LINP_WIDTH > PAGE_WIDTH) {
             row++;
             currX = 0;
           }
           PageView.appendChild(el);
+          i++;
         }
       }
 
-      function drawElements(elements) {
+      function drawElements(elements, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT,
+          getNeighborWidth
+        } = ctx;
         const PageView = document.getElementById('page-view');
-        const PAGE_WIDTH = PageView.clientWidth;
-        const PAGE_HEIGHT = PageView.clientHeight;
         let row = 0;
         let currX = SP_WIDTH;
-        for (let i = 0; i < elements.length; i++) {
+        let width = ELEM_WIDTH;
+        let height = ELEM_HEIGHT;
+        let lineBreak = 0;
+        let i = 0;
+        while (i < elements.length) {
           const el = document.createElement('div');
-          let width = ELEM_WIDTH;
-          let height = ELEM_HEIGHT;
-          if (elements[i].type == "neighbor") {
-            width = NEIGHBOR_WIDTH;
+          let indexElement = elements[i];
+          if (indexElement.value.type == "TYPE_NEIGHBOR") {
+            width = getNeighborWidth(i);
             height = NEIGHBOR_HEIGHT;
+          } else {
+            width = ELEM_WIDTH;
+            height = ELEM_HEIGHT;
           }
+          let originalWidth = width;
+          const remainingSpace = PAGE_WIDTH - currX;
+          if (lineBreak) {
+            width = width - lineBreak;
+            lineBreak = 0;
+          }
+          const remainingSpaceAfterCurrent = remainingSpace - width;
+          if (remainingSpaceAfterCurrent < 0) {
+            lineBreak = PAGE_WIDTH - currX;
+            width = lineBreak;
+          }
+          const shouldHaveText = width >= (originalWidth / 2);
+          const tidText = tidToText(indexElement.tid);
           el.style.width = `${width}px`;
           el.style.height = `${height}px`;
           el.style.position = `absolute`;
           el.style.right = `${currX}px`;
           el.style.bottom = `${ELEM_HEIGHT * row}px`;
           el.style.border = `1px solid`;
-          el.style.textAlign = `center`;
-          el.innerText = `${tidToText(elements[i].tid)}`
-          el.id = `elem-${elements[i].tid.ip_posid}`
-          el.classList.add('cursor-pointer');
-          el.classList.add(elements[i].type);
-          currX += width;
-          const nextElem = elements[i + 1]
-          if (nextElem) {
-            const nextElemWidth = nextElem.type == 'neighbor' ? NEIGHBOR_WIDTH : ELEM_WIDTH;
-            if (currX + nextElemWidth > PAGE_WIDTH) {
-              row++;
-              currX = 0;
-            }
+          el.style.display = `flex`;
+          el.style.justifyContent = `center`;
+          el.style.alignItems = `center`;
+          if (shouldHaveText) {
+            el.innerText = tidText;
           }
-          el.onclick = () => showJSONDetails(elements[i]);
+          const elementClass = `elem-${indexElement.tid.ip_posid}`;
+          el.classList.add(elementClass)
+          el.classList.add('cursor-pointer');
+          el.classList.add(indexElement.value.type);
+          if (indexElement.value.deleted) {
+            el.classList.add('elem-deleted');
+          }
+          ctx.LAST_ELEMENT_X = PAGE_WIDTH - (currX + width + 25);
+          ctx.LAST_ELEMENT_Y = Math.floor(PAGE_HEIGHT - (ELEM_HEIGHT * (row + 1)));
+          currX += width;
+          el.onclick = () => showJSONDetails(indexElement.value, `Page element ${tidText}`);
+          el.onmouseenter = () => {
+            setElementHover($(`.${elementClass}`));
+          };
+          el.onmouseleave = () => {
+            removeElementHover($(`.${elementClass}`));
+          };
           PageView.appendChild(el);
+          if (remainingSpaceAfterCurrent <= 0) {
+            currX = 0;
+            row++;
+          }
+          if (!lineBreak) i += 1;
         }
       }
 
-      function drawHeader(header) {
+      function drawHeader(header, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
+        } = ctx;
         const PageView = document.getElementById('page-view');
         const el = document.createElement('div');
         el.style.width = `${HEADER_WIDTH}px`;
@@ -438,15 +570,29 @@
         el.style.top = `0`;
         el.style.border = `1px solid`;
         el.style.textAlign = `center`;
-        el.innerText = 'Page Header'
+        el.innerText = 'hdr'
         el.classList.add('cursor-pointer');
         el.classList.add('page-header');
         PageView.appendChild(el);
-        el.onclick = () => showJSONDetails(header);
-        drawLinePointers(header.pd_linp)
+        el.onclick = () => showJSONDetails(header, 'Page Header');
+        drawLinePointers(header.pd_linp, ctx)
       }
 
-      function drawSpecial(special) {
+      function drawSpecial(special, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
+        } = ctx;
         const PageView = document.getElementById('page-view');
         const el = document.createElement('div');
         el.style.width = `${SP_WIDTH}px`;
@@ -456,17 +602,19 @@
         el.style.bottom = `0`;
         el.style.border = `1px solid`;
         el.style.textAlign = `center`;
-        el.innerText = 'pd_special'
+        el.innerText = 'sp'
         el.classList.add('cursor-pointer');
         el.classList.add('pd-special');
-        el.onclick = () => showJSONDetails(special);
+        el.onclick = () => showJSONDetails(special, 'Page opaque info');
         PageView.appendChild(el);
       }
 
       function drawPage(page) {
-        drawHeader(page.header);
-        drawSpecial(page.special);
-        drawElements(page.elements);
+        const ctx = calculateSizes(page);
+        console.log(ctx);
+        drawSpecial(page.special, ctx);
+        drawElements(page.elements, ctx);
+        drawHeader(page.header, ctx);
       }
 
       function drawSegment(indexData) {
@@ -482,8 +630,14 @@
         SegmentView.appendChild(metadataPage);
         for (let i = 0; i < indexData.pages.length; i++) {
           const page = document.createElement('div');
+          const indexPage = indexData.pages[i];
+          console.log(indexPage.header);
+          const percent = (indexPage.header.pd_pagesize_version - (indexPage.header.pd_upper- indexPage.header.pd_lower)) / indexPage.header.pd_pagesize_version * 100;
+          const fullPercent = Math.round(percent * 100) / 100;
           page.innerHTML = `
+							
 							<span>Page ${i + 1}</span>
+							<span>${fullPercent}% used</span>
 							<span>Click to View</span>`;
           page.classList.add("page", "cursor-pointer", "hover:bg-gray-100", "flex-col", "justify-between", "items-center");
           page.onclick = () => {
@@ -517,14 +671,21 @@
         }
       }
 
-      function showJSONDetails(jsonData) {
-        $('#json-data').jsonViewer(jsonData);
+      function showJSONDetails(jsonData, title) {
+        $('#item-description').text(title);
+        $('#json-data').jsonViewer(jsonData, {
+          collapsed: true,
+          rootCollapsable: false
+        });
         $("#block-json").modal();
       }
 
       function refreshView() {
         if (window.SELECTED_VIEW === JSON_VIEW) {
-          $('#json-renderer').jsonViewer(INDEX_DATA);
+          $('#json-renderer').jsonViewer(INDEX_DATA, {
+            collapsed: true,
+            rootCollapsable: false
+          });
         } else {
           clearAll();
           drawView(INDEX_DATA);
@@ -609,14 +770,22 @@
         emulateQueryInTerminal(`DELETE ${n}`, false, true);
         await parse_pgvector_index(INDEX_NAME);
       }
+
       window.removeItems = removeItems;
-      async function fullVacuum() {
-        await terminal.exec("VACUUM FULL");
+
+      async function vacuum(full) {
+        if (full) {
+          await terminal.exec("VACUUM FULL");
+        } else {
+          await terminal.exec("VACUUM");
+        }
         await parse_pgvector_index(INDEX_NAME);
       }
-      window.fullVacuum = fullVacuum;
-      await setup();
-      refreshAll();
+      window.vacuum = vacuum;
+      $(document).ready(async () => {
+        await setup();
+        refreshAll();
+      });
     </script>
   </body>
 </html>
