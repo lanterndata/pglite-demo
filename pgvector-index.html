@@ -306,6 +306,7 @@
       const VISUAL_VIEW = 'visual';
       const PAGE_VIEW = 'page';
       const SEGMENT_VIEW = 'segment';
+      const PAGE_SIZE_BYTE = 8192;
       window.SUBVIEW = SEGMENT_VIEW;
       window.SELECTED_VIEW = VISUAL_VIEW;
       async function parse_pgvector_index(index_name = INDEX_NAME) {
@@ -317,7 +318,6 @@
         const retPtr = pg.emp.resolveGlobalSymbol('parse_pgvector_index_to_json').sym(ptr)
         pg.emp.___libc_free(ptr);
         const jsonStr = pg.emp.UTF8ToString(retPtr);
-        console.log(jsonStr);
         INDEX_DATA = JSON.parse(jsonStr);
         refreshView();
       }
@@ -332,27 +332,22 @@
 
       function calculateSizes(page) {
         const PageView = document.getElementById('page-view');
-        const PAGE_SIZE_BYTE = page.header.pd_pagesize_version;
         let ELEM_SIZE_BYTE = 0;
         let NEIGHBOR_SIZE_BYTE = 0;
-        let BIGGEST_ITEM_BYTE = 0;
         for (let i = 0; i < page.header.pd_linp.length; i++) {
-          if (page.elements[i].value.type === 'TYPE_NEIGHBOR') {
-            NEIGHBOR_SIZE_BYTE = page.header.pd_linp[i].lp_len;
-          } else {
+          if (page.elements[i].value.type === 'TYPE_ELEMENT') {
             ELEM_SIZE_BYTE = page.header.pd_linp[i].lp_len;
-          }
-          if (page.header.pd_linp[i].lp_len > BIGGEST_ITEM_BYTE) {
-            BIGGEST_ITEM_BYTE = page.header.pd_linp[i].lp_len;
+            break;
           }
         }
+
         const HEADER_SIZE_BYTE = 24;
         const LINP_SIZE_BYTE = 4;
-        const SPECIAL_SIZE_BYTE = 12;
+        const SPECIAL_SIZE_BYTE = 8;
         const SMALLEST_ITEM_COUNT = PAGE_SIZE_BYTE / LINP_SIZE_BYTE;
-        let PAGE_WIDTH = 1024;
+        let PAGE_WIDTH = 1041;
 
-        if (window.innerHeight - 80 < 1024) {
+        if (window.innerHeight - 80 < 1041) {
           PAGE_WIDTH = 928;
           $("#visual-view").css("overflow-x", "auto");
         }
@@ -361,29 +356,27 @@
           PAGE_WIDTH = 768;
           $("#visual-view").css("overflow-x", "auto");
         }
-        const GRID_SQUARE_HEIGHT = 16;
-        const GRID_SQUARE_WIDTH = PAGE_WIDTH ** 2 / SMALLEST_ITEM_COUNT / GRID_SQUARE_HEIGHT;
+        const GRID_ITEM_HEIGHT = 16;
+        const GRID_ITEM_WIDTH = PAGE_WIDTH ** 2 / SMALLEST_ITEM_COUNT / GRID_ITEM_HEIGHT;
         const PAGE_HEIGHT = PAGE_WIDTH;
         PageView.style.height = `${PAGE_WIDTH}px`;
         PageView.style.width = `${PAGE_WIDTH}px`;
-        const BIGGEST_ELEM_AREA = ((BIGGEST_ITEM_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
-        const ELEM_AREA = ((ELEM_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
-        const SP_AREA = ((SPECIAL_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
-        const HEADER_AREA = ((HEADER_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
-        const HEADER_HEIGHT = GRID_SQUARE_HEIGHT;
-        const LINP_WIDTH = GRID_SQUARE_WIDTH;
-        const LINP_HEIGHT = GRID_SQUARE_HEIGHT;
-        let BIGGEST_ITEM_HEIGHT = LINP_HEIGHT; //Math.sqrt(BIGGEST_ELEM_AREA);
-        let ELEM_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        const ELEM_AREA = ((ELEM_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_ITEM_WIDTH) * GRID_ITEM_HEIGHT;
+        const SP_AREA = ((SPECIAL_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_ITEM_WIDTH) * GRID_ITEM_HEIGHT;
+        const HEADER_AREA = ((HEADER_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_ITEM_WIDTH) * GRID_ITEM_HEIGHT;
+        const HEADER_HEIGHT = GRID_ITEM_HEIGHT;
+        const LINP_WIDTH = GRID_ITEM_WIDTH;
+        const LINP_HEIGHT = GRID_ITEM_HEIGHT;
+        let ELEM_HEIGHT = LINP_HEIGHT;
         let ELEM_WIDTH = ELEM_AREA / ELEM_HEIGHT;
-        let NEIGHBOR_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        let NEIGHBOR_HEIGHT = LINP_HEIGHT;
         let SP_HEIGHT = ELEM_HEIGHT;
         let SP_WIDTH = SP_AREA / SP_HEIGHT;
         let HEADER_WIDTH = HEADER_AREA / HEADER_HEIGHT;
         return {
           getNeighborWidth: i => {
             const neighborBytes = page.header.pd_linp[i].lp_len
-            const neihborArea = ((neighborBytes / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+            const neihborArea = ((neighborBytes / LINP_SIZE_BYTE) * GRID_ITEM_WIDTH) * GRID_ITEM_HEIGHT;
             return neihborArea / NEIGHBOR_HEIGHT;
           },
           PAGE_WIDTH,
@@ -454,6 +447,7 @@
           el.onclick = () => showJSONDetails(linePointer, 'Page Item Pointer');
           currX += LINP_WIDTH;
           if (currX + LINP_WIDTH > PAGE_WIDTH) {
+            el.style.width = `${LINP_WIDTH + (PAGE_WIDTH - currX)}px`;
             row++;
             currX = 0;
           }
@@ -611,7 +605,6 @@
 
       function drawPage(page) {
         const ctx = calculateSizes(page);
-        console.log(ctx);
         drawSpecial(page.special, ctx);
         drawElements(page.elements, ctx);
         drawHeader(page.header, ctx);
@@ -631,8 +624,7 @@
         for (let i = 0; i < indexData.pages.length; i++) {
           const page = document.createElement('div');
           const indexPage = indexData.pages[i];
-          console.log(indexPage.header);
-          const percent = (indexPage.header.pd_pagesize_version - (indexPage.header.pd_upper- indexPage.header.pd_lower)) / indexPage.header.pd_pagesize_version * 100;
+          const percent = (PAGE_SIZE_BYTE - (indexPage.header.pd_upper- indexPage.header.pd_lower)) / PAGE_SIZE_BYTE * 100;
           const fullPercent = Math.round(percent * 100) / 100;
           page.innerHTML = `
 							
