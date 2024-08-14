@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pgvector Index Parser</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/css/jquery.terminal.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery-modal/0.9.1/jquery.modal.min.css" />
+    <style>
+      .fade-out {
+        animation: fadeOut 0.3s forwards;
+      }
+
+      @keyframes fadeOut {
+        from {
+          opacity: 1;
+        }
+
+        to {
+          opacity: 0;
+        }
+      }
+
+      #main-container,
+      #setup-messages {
+        display: flex;
+        min-height: calc(100vh - 20px);
+        /* Adjust the height according to the desired space */
+        overflow-y: auto;
+        overflow-x: hidden;
+        border: 1px solid;
+      }
+
+      #main-container {
+        display: none;
+      }
+
+      .container {
+        min-height: calc(100vh - 20px);
+        /* Ensure it takes the full height minus margins */
+        display: flex;
+        flex-direction: row;
+      }
+
+      .search-wrapper {
+        min-width: calc(100vw / 1.70);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .terminal-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .page {
+        border: 1px solid;
+        width: 280px;
+        height: 300px;
+        display: flex;
+        margin-right: 5px;
+      }
+
+      #title {
+        font-weight: bold;
+      }
+
+      .TYPE_ELEMENT {
+        background: gray;
+      }
+
+      .TYPE_NEIGHBOR {
+        background: wheat;
+      }
+
+      .page-header {
+        font-size: 10px;
+        background: yellowgreen;
+      }
+
+      #page-view {
+        height: calc(100% - 60px);
+        overflow-y: hidden;
+        border: 1px solid;
+        box-sizing: content-box;
+      }
+
+      .linp {
+        background: #c3c3c3;
+      }
+
+      .pd-special {
+        background: #00ff6e;
+        word-break: break-all;
+        font-size: 10px;
+      }
+
+      .selected {
+        background: black;
+        color: white;
+      }
+
+      .meta-json {
+        max-width: 100%;
+      }
+
+      .modal {
+        overflow-y: auto;
+      }
+
+      #segment-view {
+        flex-wrap: wrap;
+      }
+
+      .page-header:hover,
+      .pd-special:hover,
+      .linp:hover {
+        opacity: .6;
+      }
+
+      .elem-deleted {
+        background: repeating-linear-gradient(-45deg, tomato 0px, tomato 4px, gray 4px, gray 12px);
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100">
+    <div class="container mx-auto">
+      <div class="search-wrapper bg-white">
+        <div id="setup-messages" class="mb-4 flex-col">
+          <div class="text-gray-700 mb-2">Loading WASM...</div>
+        </div>
+        <div id="main-container" class="flex-col items-center">
+          <div id="visual-view" class="w-full h-full flex flex-col items-center">
+            <div class="flex justify-between w-full mb-5">
+              <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="previousView()"> Prev </button>
+              <span id="title">restaurants_cords_idx</span>
+              <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="refreshAll()"> Refresh </button>
+            </div>
+            <div id="segment-view" class="flex flex-row w-full"></div>
+            <div id="page-view" class="w-full relative hidden"></div>
+            <div id="block-json" class="modal">
+              <p id="item-description"></p>
+              <div id="json-data"></div>
+            </div>
+          </div>
+          <div id="json-view" class="hidden">
+            <pre id="json-renderer"></pre>
+          </div>
+          <div class="flex justify-around">
+            <button id="visual-view-btn" onclick="setViewMode('visual')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l mr-5 selected">Visual View</button>
+            <button id="json-view-btn" onclick="setViewMode('json')" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l">JSON View</button>
+          </div>
+        </div>
+      </div>
+      <div class="terminal-wrapper">
+        <div id="terminal" class="w-full bg-gray-900 text-white flex-1"></div>
+        <div id="terminal-btns" class="flex justify-around">
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="insertItems(10)">Insert 10</button>
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="removeItems(10)">Delete 10</button>
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="vacuum(false)">Vacuum</button>
+          <button class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l" onclick="vacuum(true)">Full Vacuum</button>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/jquery"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery.json-viewer@1.5.0/json-viewer/jquery.json-viewer.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.terminal/2.42.0/js/jquery.terminal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-modal/0.9.1/jquery.modal.min.js"></script>
+    <script type="module">
+      const PSQL_COMMANDS = {
+        '\\d': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+        '\\dt': 'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+        '\\dx': 'SELECT * FROM pg_available_extensions;',
+        '\\l': 'SELECT datname FROM pg_database;',
+        '\\c': 'SELECT current_database();',
+        '\\dn': 'SELECT nspname FROM pg_catalog.pg_namespace;',
+        '\\df': 'SELECT proname FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+        '\\dv': 'SELECT viewname FROM pg_catalog.pg_views WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+        '\\di': 'SELECT indexname FROM pg_indexes WHERE schemaname != \'pg_catalog\' AND schemaname != \'information_schema\';',
+        '\\ds': 'SELECT relname FROM pg_statio_user_tables;',
+        '\\dD': 'SELECT obj_description(oid) FROM pg_class WHERE relkind = \'r\';',
+        '\\dE': 'SELECT eventname FROM pg_event_trigger;',
+        '\\dy': 'SELECT * FROM pg_stat_activity;',
+        '\\do': 'SELECT * FROM pg_am;',
+        '\\da': 'SELECT * FROM pg_aggregate;',
+        '\\dc': 'SELECT * FROM pg_conversion;',
+        '\\dp': 'SELECT * FROM information_schema.role_table_grants;',
+        '\\dd': 'SELECT * FROM pg_description;',
+        '\\df+': 'SELECT * FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');',
+        '\\dm': 'SELECT matviewname FROM pg_matviews;',
+        '\\ds+': 'SELECT * FROM pg_statio_user_tables;',
+        '\\dT': 'SELECT typname FROM pg_type WHERE typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = \'public\');'
+      };
+      // Initialize the terminal
+      const RESPONSES = {};
+      const INDEX_NAME = 'restaurants_cords_idx';
+
+      function getTerminalOutputFromResult(result) {
+        if (result.rows.length) {
+          const responseJson = JSON.stringify(result.rows, null, 2);
+          if (responseJson.length > 500) {
+            RESPONSES[terminal.last_index() + 1] = responseJson;
+            return `${JSON.stringify(result.rows).slice(0, 10)}... 
+						
+						<type "show ${terminal.last_index() + 1}" to view all output>`;
+          } else {
+            return responseJson;
+          }
+        }
+        return `AFFECTED: ${result.affectedRows}`;
+      }
+      window.terminal = await new Promise(resolve => {
+        jQuery(function($, undefined) {
+          const term = $('#terminal').terminal(async function(cmd) {
+            if (!cmd) return;
+            const command = PSQL_COMMANDS[cmd.trim()] ? PSQL_COMMANDS[cmd.trim()] : cmd;
+            const showCmdParts = command.match(/show (\d+)/)
+            if (showCmdParts) {
+              const lineNumber = showCmdParts[1];
+              if (RESPONSES[lineNumber]) {
+                this.update(lineNumber, RESPONSES[lineNumber]);
+              } else {
+                this.error(`response ${lineNumber} does not exist`);
+              }
+              return;
+            }
+            try {
+              const result = await pg.query(command);
+              this.echo(getTerminalOutputFromResult(result));
+            } catch (err) {
+              console.error(err);
+              this.error(`ERROR: ${err}`);
+            }
+          }, {
+            greetings: 'Pglite Shell\n',
+            name: 'psql',
+            height: window.innerHeight / 2,
+            prompt: 'postgres@browser=# '
+          });
+          resolve(term);
+        });
+      });
+      import {
+        PGlite
+      } from "../dist/index.js";
+      // In-memory database:
+      const pg = new PGlite({
+        extensions: {
+          vector: {
+            // pathOrUrl: 'http://localhost:5555',
+            pathOrUrl: 'https://storage.googleapis.com/lantern-wasm/pgvector-lantern',
+            setup: () => null
+          },
+        }
+      });
+      window.pg = pg;
+      await pg.waitReady;
+      async function showMessage(msg) {
+        const messagesContainer = document.getElementById('setup-messages');
+        const messageElement = document.createElement('div');
+        messageElement.textContent = msg;
+        messageElement.className = 'text-gray-700 mb-2';
+        messagesContainer.appendChild(messageElement);
+      }
+
+      function emulateQueryInTerminal(query, pause, resume) {
+        terminal.echo(query);
+      };
+      async function setup() {
+        showMessage("Initializing...");
+        const messagesContainer = document.getElementById('setup-messages');
+        showMessage("Running init sql...");
+        const len = 60;
+        window.GEO_DATA = (await (await fetch('/restaurants.json')).json()).slice(0, len);
+        await terminal.exec("CREATE EXTENSION vector");
+        await terminal.exec("CREATE TABLE restaurants (id SERIAL PRIMARY KEY, address TEXT, categories TEXT, city TEXT, country VARCHAR(2), cords VECTOR(2), name TEXT, state VARCHAR(2), websites TEXT)");
+        const insertQuery = "INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)";
+        emulateQueryInTerminal(insertQuery, true);
+        for (const data of GEO_DATA) {
+          await pg.query("INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)",
+            [
+              data.address,
+              data.categories,
+              data.city,
+              data.country, `[${data.cords.join(',')}]`,
+              data.name,
+              data.state,
+              data.websites
+            ]);
+        }
+        emulateQueryInTerminal(`INSERT ${len}`, false, true);
+        await terminal.exec(`CREATE INDEX ${INDEX_NAME} ON restaurants USING hnsw(cords vector_l2_ops) WITH (M=4, ef_construction=128)`);
+        await new Promise(r => setTimeout(r, 300));
+        messagesContainer.classList.add("fade-out");
+        messagesContainer.addEventListener('animationend', () => {
+          messagesContainer.style.display = 'none';
+          document.getElementById('main-container').style.display = 'flex';;
+        });
+      }
+      let INDEX_DATA = null;
+      const JSON_VIEW = 'json';
+      const VISUAL_VIEW = 'visual';
+      const PAGE_VIEW = 'page';
+      const SEGMENT_VIEW = 'segment';
+      window.SUBVIEW = SEGMENT_VIEW;
+      window.SELECTED_VIEW = VISUAL_VIEW;
+      async function parse_pgvector_index(index_name = INDEX_NAME) {
+        const res = await pg.query(`select relname, relfilenode from pg_class where relname='${index_name}';`)
+        if (!res.rows.length) return;
+        await pg.exec(`CHECKPOINT;`);
+        const index_file_name = `/pgdata/base/1/${res.rows[0].relfilenode}`;
+        var ptr = pg.emp.stringToNewUTF8(index_file_name)
+        const retPtr = pg.emp.resolveGlobalSymbol('parse_pgvector_index_to_json').sym(ptr)
+        pg.emp.___libc_free(ptr);
+        const jsonStr = pg.emp.UTF8ToString(retPtr);
+        console.log(jsonStr);
+        INDEX_DATA = JSON.parse(jsonStr);
+        refreshView();
+      }
+      window.parse_pgvector_index = parse_pgvector_index;
+      let SELECTED_PAGE = 0;
+
+      function tidToText(tid) {
+        const blockNumber = tid.ip_blkid.bi_hi << 16 | tid.ip_blkid.bi_lo;
+        const offset = tid.ip_posid;
+        return `(${blockNumber}, ${offset})`;
+      }
+
+      function calculateSizes(page) {
+        const PageView = document.getElementById('page-view');
+        const PAGE_SIZE_BYTE = page.header.pd_pagesize_version;
+        let ELEM_SIZE_BYTE = 0;
+        let NEIGHBOR_SIZE_BYTE = 0;
+        let BIGGEST_ITEM_BYTE = 0;
+        for (let i = 0; i < page.header.pd_linp.length; i++) {
+          if (page.elements[i].value.type === 'TYPE_NEIGHBOR') {
+            NEIGHBOR_SIZE_BYTE = page.header.pd_linp[i].lp_len;
+          } else {
+            ELEM_SIZE_BYTE = page.header.pd_linp[i].lp_len;
+          }
+          if (page.header.pd_linp[i].lp_len > BIGGEST_ITEM_BYTE) {
+            BIGGEST_ITEM_BYTE = page.header.pd_linp[i].lp_len;
+          }
+        }
+        const HEADER_SIZE_BYTE = 24;
+        const LINP_SIZE_BYTE = 4;
+        const SPECIAL_SIZE_BYTE = 12;
+        const SMALLEST_ITEM_COUNT = PAGE_SIZE_BYTE / LINP_SIZE_BYTE;
+        let PAGE_WIDTH = 1024;
+
+        if (window.innerHeight - 80 < 1024) {
+          PAGE_WIDTH = 928;
+          $("#visual-view").css("overflow-x", "auto");
+        }
+
+        if (window.innerHeight - 80 < 928) {
+          PAGE_WIDTH = 768;
+          $("#visual-view").css("overflow-x", "auto");
+        }
+        const GRID_SQUARE_HEIGHT = 16;
+        const GRID_SQUARE_WIDTH = PAGE_WIDTH ** 2 / SMALLEST_ITEM_COUNT / GRID_SQUARE_HEIGHT;
+        const PAGE_HEIGHT = PAGE_WIDTH;
+        PageView.style.height = `${PAGE_WIDTH}px`;
+        PageView.style.width = `${PAGE_WIDTH}px`;
+        const BIGGEST_ELEM_AREA = ((BIGGEST_ITEM_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const ELEM_AREA = ((ELEM_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const SP_AREA = ((SPECIAL_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const HEADER_AREA = ((HEADER_SIZE_BYTE / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+        const HEADER_HEIGHT = GRID_SQUARE_HEIGHT;
+        const LINP_WIDTH = GRID_SQUARE_WIDTH;
+        const LINP_HEIGHT = GRID_SQUARE_HEIGHT;
+        let BIGGEST_ITEM_HEIGHT = LINP_HEIGHT; //Math.sqrt(BIGGEST_ELEM_AREA);
+        let ELEM_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        let ELEM_WIDTH = ELEM_AREA / ELEM_HEIGHT;
+        let NEIGHBOR_HEIGHT = BIGGEST_ITEM_HEIGHT;
+        let SP_HEIGHT = ELEM_HEIGHT;
+        let SP_WIDTH = SP_AREA / SP_HEIGHT;
+        let HEADER_WIDTH = HEADER_AREA / HEADER_HEIGHT;
+        return {
+          getNeighborWidth: i => {
+            const neighborBytes = page.header.pd_linp[i].lp_len
+            const neihborArea = ((neighborBytes / LINP_SIZE_BYTE) * GRID_SQUARE_WIDTH) * GRID_SQUARE_HEIGHT;
+            return neihborArea / NEIGHBOR_HEIGHT;
+          },
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
+        }
+      }
+
+      function setElementHover(elements) {
+        elements.css('opacity', '0.6');
+      }
+
+      function removeElementHover(elements) {
+        elements.css('opacity', '1');
+      }
+
+      function drawLinePointers(linePointers, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT,
+          LAST_ELEMENT_X,
+          LAST_ELEMENT_Y,
+        } = ctx;
+        const PageView = document.getElementById('page-view');
+        let row = 0;
+        let currX = HEADER_WIDTH;
+        let i = 0;
+        while (i < linePointers.length) {
+          const elemY = LINP_HEIGHT * row;
+          const el = document.createElement('div');
+          el.style.width = `${LINP_WIDTH}px`;
+          el.style.height = `${LINP_HEIGHT}px`;
+          el.style.position = `absolute`;
+          el.style.left = `${currX}px`;
+          el.style.top = `${elemY}px`;
+          el.style.border = `1px solid`;
+          el.style.textAlign = `center`;
+          el.style.fontSize = `10px`;
+          el.innerText = `${i + 1}`
+          el.classList.add('cursor-pointer');
+          el.classList.add('linp');
+          const pointedElementClass = `.elem-${i + 1}`;
+          el.onmouseenter = () => {
+            setElementHover($(pointedElementClass));
+          };
+          el.onmouseleave = () => {
+            removeElementHover($(pointedElementClass));
+          };
+          const linePointer = linePointers[i];
+          el.onclick = () => showJSONDetails(linePointer, 'Page Item Pointer');
+          currX += LINP_WIDTH;
+          if (currX + LINP_WIDTH > PAGE_WIDTH) {
+            row++;
+            currX = 0;
+          }
+          PageView.appendChild(el);
+          i++;
+        }
+      }
+
+      function drawElements(elements, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT,
+          getNeighborWidth
+        } = ctx;
+        const PageView = document.getElementById('page-view');
+        let row = 0;
+        let currX = SP_WIDTH;
+        let width = ELEM_WIDTH;
+        let height = ELEM_HEIGHT;
+        let lineBreak = 0;
+        let i = 0;
+        while (i < elements.length) {
+          const el = document.createElement('div');
+          let indexElement = elements[i];
+          if (indexElement.value.type == "TYPE_NEIGHBOR") {
+            width = getNeighborWidth(i);
+            height = NEIGHBOR_HEIGHT;
+          } else {
+            width = ELEM_WIDTH;
+            height = ELEM_HEIGHT;
+          }
+          let originalWidth = width;
+          const remainingSpace = PAGE_WIDTH - currX;
+          if (lineBreak) {
+            width = width - lineBreak;
+            lineBreak = 0;
+          }
+          const remainingSpaceAfterCurrent = remainingSpace - width;
+          if (remainingSpaceAfterCurrent < 0) {
+            lineBreak = PAGE_WIDTH - currX;
+            width = lineBreak;
+          }
+          const shouldHaveText = width >= (originalWidth / 2);
+          const tidText = tidToText(indexElement.tid);
+          el.style.width = `${width}px`;
+          el.style.height = `${height}px`;
+          el.style.position = `absolute`;
+          el.style.right = `${currX}px`;
+          el.style.bottom = `${ELEM_HEIGHT * row}px`;
+          el.style.border = `1px solid`;
+          el.style.display = `flex`;
+          el.style.justifyContent = `center`;
+          el.style.alignItems = `center`;
+          if (shouldHaveText) {
+            el.innerText = tidText;
+          }
+          const elementClass = `elem-${indexElement.tid.ip_posid}`;
+          el.classList.add(elementClass)
+          el.classList.add('cursor-pointer');
+          el.classList.add(indexElement.value.type);
+          if (indexElement.value.deleted) {
+            el.classList.add('elem-deleted');
+          }
+          ctx.LAST_ELEMENT_X = PAGE_WIDTH - (currX + width + 25);
+          ctx.LAST_ELEMENT_Y = Math.floor(PAGE_HEIGHT - (ELEM_HEIGHT * (row + 1)));
+          currX += width;
+          el.onclick = () => showJSONDetails(indexElement.value, `Page element ${tidText}`);
+          el.onmouseenter = () => {
+            setElementHover($(`.${elementClass}`));
+          };
+          el.onmouseleave = () => {
+            removeElementHover($(`.${elementClass}`));
+          };
+          PageView.appendChild(el);
+          if (remainingSpaceAfterCurrent <= 0) {
+            currX = 0;
+            row++;
+          }
+          if (!lineBreak) i += 1;
+        }
+      }
+
+      function drawHeader(header, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
+        } = ctx;
+        const PageView = document.getElementById('page-view');
+        const el = document.createElement('div');
+        el.style.width = `${HEADER_WIDTH}px`;
+        el.style.height = `${HEADER_HEIGHT}px`;
+        el.style.position = `absolute`;
+        el.style.left = `0`;
+        el.style.top = `0`;
+        el.style.border = `1px solid`;
+        el.style.textAlign = `center`;
+        el.innerText = 'hdr'
+        el.classList.add('cursor-pointer');
+        el.classList.add('page-header');
+        PageView.appendChild(el);
+        el.onclick = () => showJSONDetails(header, 'Page Header');
+        drawLinePointers(header.pd_linp, ctx)
+      }
+
+      function drawSpecial(special, ctx) {
+        const {
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+          ELEM_WIDTH,
+          ELEM_HEIGHT,
+          NEIGHBOR_WIDTH,
+          NEIGHBOR_HEIGHT,
+          HEADER_WIDTH,
+          HEADER_HEIGHT,
+          LINP_WIDTH,
+          LINP_HEIGHT,
+          SP_WIDTH,
+          SP_HEIGHT
+        } = ctx;
+        const PageView = document.getElementById('page-view');
+        const el = document.createElement('div');
+        el.style.width = `${SP_WIDTH}px`;
+        el.style.height = `${SP_HEIGHT}px`;
+        el.style.position = `absolute`;
+        el.style.right = `0`;
+        el.style.bottom = `0`;
+        el.style.border = `1px solid`;
+        el.style.textAlign = `center`;
+        el.innerText = 'sp'
+        el.classList.add('cursor-pointer');
+        el.classList.add('pd-special');
+        el.onclick = () => showJSONDetails(special, 'Page opaque info');
+        PageView.appendChild(el);
+      }
+
+      function drawPage(page) {
+        const ctx = calculateSizes(page);
+        console.log(ctx);
+        drawSpecial(page.special, ctx);
+        drawElements(page.elements, ctx);
+        drawHeader(page.header, ctx);
+      }
+
+      function drawSegment(indexData) {
+        const SegmentView = document.getElementById('segment-view');
+        const metadataPage = document.createElement('div');
+        const metadata = document.createElement('pre');
+        metadata.innerHTML = JSON.stringify(indexData.metadata, null, 2);
+        const metadataTitle = document.createElement('span');
+        metadataTitle.innerText = 'Page 0 (meta)';
+        metadataPage.appendChild(metadataTitle);
+        metadataPage.appendChild(metadata);
+        metadataPage.classList.add("page", "flex-col", "items-center", "justify-start", "meta-json");
+        SegmentView.appendChild(metadataPage);
+        for (let i = 0; i < indexData.pages.length; i++) {
+          const page = document.createElement('div');
+          const indexPage = indexData.pages[i];
+          console.log(indexPage.header);
+          const percent = (indexPage.header.pd_pagesize_version - (indexPage.header.pd_upper- indexPage.header.pd_lower)) / indexPage.header.pd_pagesize_version * 100;
+          const fullPercent = Math.round(percent * 100) / 100;
+          page.innerHTML = `
+							
+							<span>Page ${i + 1}</span>
+							<span>${fullPercent}% used</span>
+							<span>Click to View</span>`;
+          page.classList.add("page", "cursor-pointer", "hover:bg-gray-100", "flex-col", "justify-between", "items-center");
+          page.onclick = () => {
+            SELECTED_PAGE = i;
+            SUBVIEW = PAGE_VIEW;
+            drawView(indexData);
+            refreshView(indexData);
+          }
+          SegmentView.appendChild(page);
+        }
+      }
+
+      function clearAll() {
+        const SegmentView = document.getElementById('segment-view');
+        const PageView = document.getElementById('page-view');
+        PageView.innerHTML = '';
+        SegmentView.innerHTML = '';
+      }
+
+      function drawView(indexData) {
+        const SegmentView = document.getElementById('segment-view');
+        const PageView = document.getElementById('page-view');
+        if (SUBVIEW == PAGE_VIEW) {
+          SegmentView.classList.add("hidden");
+          PageView.classList.remove("hidden");
+          drawPage(indexData.pages[SELECTED_PAGE]);
+        } else {
+          SegmentView.classList.remove("hidden");
+          PageView.classList.add("hidden");
+          drawSegment(indexData);
+        }
+      }
+
+      function showJSONDetails(jsonData, title) {
+        $('#item-description').text(title);
+        $('#json-data').jsonViewer(jsonData, {
+          collapsed: true,
+          rootCollapsable: false
+        });
+        $("#block-json").modal();
+      }
+
+      function refreshView() {
+        if (window.SELECTED_VIEW === JSON_VIEW) {
+          $('#json-renderer').jsonViewer(INDEX_DATA, {
+            collapsed: true,
+            rootCollapsable: false
+          });
+        } else {
+          clearAll();
+          drawView(INDEX_DATA);
+        }
+      }
+
+      function setViewMode(mode) {
+        const VisualViewBtn = document.getElementById('visual-view-btn');
+        const JsonViewBtn = document.getElementById('json-view-btn');
+        const VisualView = document.getElementById('visual-view');
+        const JsonView = document.getElementById('json-view');
+        window.SELECTED_VIEW = mode;
+        if (mode === JSON_VIEW) {
+          JsonViewBtn.classList.add('selected');
+          VisualViewBtn.classList.remove('selected');
+          JsonView.classList.remove('hidden');
+          VisualView.classList.add('hidden');
+        } else {
+          VisualViewBtn.classList.add('selected');
+          JsonViewBtn.classList.remove('selected');
+          JsonView.classList.add('hidden');
+          VisualView.classList.remove('hidden');
+        }
+        refreshView();
+      }
+      window.setViewMode = setViewMode;
+
+      function previousView() {
+        if (SELECTED_VIEW != VISUAL_VIEW || SUBVIEW != PAGE_VIEW) return;
+        SUBVIEW = SEGMENT_VIEW;
+        refreshView();
+      }
+      window.previousView = previousView;
+
+      function refreshAll() {
+        parse_pgvector_index(INDEX_NAME);
+      }
+      window.refreshAll = refreshAll;
+
+      function getRandomItems(arr, n) {
+        // Create a copy of the array to avoid mutating the original array
+        let result = [...arr];
+        // Shuffle the array using Fisher-Yates algorithm
+        for (let i = result.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [result[i], result[j]] = [result[j], result[i]];
+        }
+        // Return the first n elements
+        return result.slice(0, n);
+      }
+      async function insertItems(n) {
+        const insertQuery = "INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)";
+        emulateQueryInTerminal(insertQuery, true);
+        const sampleData = getRandomItems(GEO_DATA, n);
+        for (const data of sampleData) {
+          await pg.query("INSERT INTO restaurants (address, categories, city, country, cords, name, state, websites) VALUES ($1, $2, $3, $4, $5::VECTOR(2), $6, $7, $8)",
+            [
+              data.address,
+              data.categories,
+              data.city,
+              data.country, `[${data.cords.join(',')}]`,
+              data.name,
+              data.state,
+              data.websites
+            ]);
+        }
+        emulateQueryInTerminal(`INSERT ${n}`, false, true);
+        await parse_pgvector_index(INDEX_NAME);
+      }
+      window.insertItems = insertItems;
+      async function removeItems(n) {
+        const query = `WITH cte AS (
+                SELECT id
+                FROM restaurants
+                ORDER BY random()
+                LIMIT ${n}
+            )
+            DELETE FROM restaurants
+            WHERE id IN (SELECT id FROM cte);`;
+        await pg.exec(query);
+        emulateQueryInTerminal(query, false, true);
+        emulateQueryInTerminal(`DELETE ${n}`, false, true);
+        await parse_pgvector_index(INDEX_NAME);
+      }
+
+      window.removeItems = removeItems;
+
+      async function vacuum(full) {
+        if (full) {
+          await terminal.exec("VACUUM FULL");
+        } else {
+          await terminal.exec("VACUUM");
+        }
+        await parse_pgvector_index(INDEX_NAME);
+      }
+      window.vacuum = vacuum;
+      $(document).ready(async () => {
+        await setup();
+        refreshAll();
+      });
+    </script>
+  </body>
+</html>
